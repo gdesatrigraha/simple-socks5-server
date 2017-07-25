@@ -1,7 +1,7 @@
 package me.dijedodol.socks5.server.simple
 
 import java.lang.Boolean
-import java.net.{Inet4Address, Inet6Address, InetSocketAddress}
+import java.net._
 
 import com.typesafe.scalalogging.LazyLogging
 import io.netty.bootstrap.Bootstrap
@@ -82,36 +82,45 @@ class Socks5ClientInboundHandler(val acceptorEventLoopGroup: EventLoopGroup, val
         bootstrap.connect(socks5CommandRequest.dstAddr(), socks5CommandRequest.dstPort()).addListener((f: ChannelFuture) => {
           val peerChannel = f.channel();
 
-          if (!peerChannel.localAddress().isInstanceOf[InetSocketAddress]) {
+          if (!peerChannel.isActive) {
+            logger.warn(s"peerChannel is unable to establish connection to: ${socks5CommandRequest.dstAddr()}:${socks5CommandRequest.dstPort()} reason: ${f.cause()}")
+
+            peerChannel.close()
+            clientChannel.writeAndFlush(new DefaultSocks5CommandResponse(f.cause() match {
+              case e: ConnectException => Socks5CommandStatus.CONNECTION_REFUSED
+              case e: NoRouteToHostException => Socks5CommandStatus.HOST_UNREACHABLE
+              case _  => Socks5CommandStatus.FAILURE
+            }, Socks5AddressType.IPv4, "0.0.0.0", 0)).addListener((f: ChannelFuture) => f.channel().close())
+          } else if (!peerChannel.localAddress().isInstanceOf[InetSocketAddress]) {
             logger.warn(s"unexpected localAddress: ${Option(peerChannel.localAddress())} className: ${Option(peerChannel.localAddress()).map(f => f.getClass.getName)} on peerChannel: ${peerChannel}")
 
             peerChannel.close()
             clientChannel.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.FAILURE, Socks5AddressType.IPv4, "0.0.0.0", 0)).addListener((f: ChannelFuture) => f.channel().close())
-          }
+          } else {
+            val localAddress = peerChannel.localAddress().asInstanceOf[InetSocketAddress]
 
-          val localAddress = peerChannel.localAddress().asInstanceOf[InetSocketAddress]
+            if ((localAddress.getAddress match {
+              case f: Inet4Address => Some(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv4, f.getHostAddress, localAddress.getPort))
+              case f: Inet6Address => Some(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv6, f.getHostAddress, localAddress.getPort))
+              case _ => None
+            }).map(f => {
+              clientChannel.writeAndFlush(f).addListener((f: ChannelFuture) => {
+                clientChannel.pipeline().remove(classOf[Socks5CommandRequestDecoder])
+                clientChannel.pipeline().remove(classOf[Socks5ClientInboundHandler])
+                clientChannel.pipeline().remove(classOf[Socks5ServerEncoder])
 
-          if ((localAddress.getAddress match {
-            case f: Inet4Address => Some(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv4, f.getHostAddress, localAddress.getPort))
-            case f: Inet6Address => Some(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv6, f.getHostAddress, localAddress.getPort))
-            case _ => None
-          }).map(f => {
-            clientChannel.writeAndFlush(f).addListener((f: ChannelFuture) => {
-              clientChannel.pipeline().remove(classOf[Socks5CommandRequestDecoder])
-              clientChannel.pipeline().remove(classOf[Socks5ClientInboundHandler])
-              clientChannel.pipeline().remove(classOf[Socks5ServerEncoder])
+                peerChannel.pipeline().addLast(new TunnelingChannelInboundHandler(clientChannel))
+                clientChannel.pipeline().addLast(new TunnelingChannelInboundHandler(peerChannel))
 
-              peerChannel.pipeline().addLast(new TunnelingChannelInboundHandler(clientChannel))
-              clientChannel.pipeline().addLast(new TunnelingChannelInboundHandler(peerChannel))
+                peerChannel.config().setAutoRead(true)
+                clientChannel.config().setAutoRead(true)
+              })
+            }).isEmpty) {
+              logger.warn(s"peerChannel unknown localAddress IP className: ${Option(localAddress.getAddress).map(f => f.getClass.getName)} on peerChannel: ${peerChannel}")
 
-              peerChannel.config().setAutoRead(true)
-              clientChannel.config().setAutoRead(true)
-            })
-          }).isEmpty) {
-            logger.warn(s"peerChannel unknown localAddress IP className: ${Option(localAddress.getAddress).map(f => f.getClass.getName)} on peerChannel: ${peerChannel}")
-
-            peerChannel.close()
-            clientChannel.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.FAILURE, Socks5AddressType.IPv4, "0.0.0.0", 0)).addListener((f: ChannelFuture) => f.channel().close())
+              peerChannel.close()
+              clientChannel.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.FAILURE, Socks5AddressType.IPv4, "0.0.0.0", 0)).addListener((f: ChannelFuture) => f.channel().close())
+            }
           }
         })
       }
