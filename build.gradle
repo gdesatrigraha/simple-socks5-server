@@ -1,5 +1,5 @@
 group 'me.dijedodol'
-version '1.0.1'
+version '1.0.2'
 
 task wrapper(type: Wrapper) {
   gradleVersion = '3.5'
