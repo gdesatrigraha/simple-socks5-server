@@ -33,9 +33,10 @@ object App extends scala.App with LazyLogging {
   try {
     socks5Server.start().closeFuture().sync()
   } catch {
-    case f: Exception => {
+    case f: Throwable => {
       logger.error("unexpected exception", f)
-      socks5Server.stop()
     }
+  } finally {
+    socks5Server.stop()
   }
 }

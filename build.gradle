@@ -1,3 +1,7 @@
+plugins {
+    id "com.github.maiflai.scalatest" version "0.22"
+}
+
 group 'me.dijedodol'
 version '1.0.2'
 
@@ -19,12 +23,19 @@ repositories {
 }
 
 dependencies {
-    compile 'org.scala-lang:scala-library-all:2.12.2'
+    compile 'org.scala-lang:scala-library-all:2.12.6'
     compile 'org.slf4j:slf4j-api:1.7.21'
     compile 'ch.qos.logback:logback-classic:1.1.7'
     compile 'com.typesafe.scala-logging:scala-logging_2.12:3.5.0'
-    compile 'io.netty:netty-all:4.1.11.Final'
+    compile 'io.netty:netty-all:4.1.25.Final'
     compile 'commons-cli:commons-cli:1.4'
 
-    testCompile group: 'junit', name: 'junit', version: '4.12'
+    testCompile 'org.scalatest:scalatest_2.12:3.0.5'
+    testRuntime 'org.pegdown:pegdown:1.4.2'
+}
+
+test {
+    testLogging {
+        showStandardStreams = true
+    }
 }

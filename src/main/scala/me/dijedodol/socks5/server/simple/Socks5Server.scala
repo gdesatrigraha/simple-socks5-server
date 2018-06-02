@@ -31,6 +31,7 @@ class Socks5Server(val socks5Config: Socks5Config) extends LazyLogging {
     val ret = serverBootstrap.bind(socks5Config.bindAddress.getHostString, socks5Config.bindAddress.getPort).sync().channel()
     logger.info(s"simple socks5 server is now listening on ${socks5Config.bindAddress}")
 
+    serverChannel = Some(ret)
     ret
   }
 
@@ -39,6 +40,7 @@ class Socks5Server(val socks5Config: Socks5Config) extends LazyLogging {
     val ret = serverChannel.map(f => f.close().sync()).getOrElse(throw new IllegalStateException("not running"))
     logger.info("simple socks5 server has been stopped")
 
+    serverChannel = None
     ret
   }
 }

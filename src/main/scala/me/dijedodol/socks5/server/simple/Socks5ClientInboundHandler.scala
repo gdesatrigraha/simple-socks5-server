@@ -1,28 +1,23 @@
 package me.dijedodol.socks5.server.simple
 
-import java.lang.Boolean
 import java.net._
 
 import com.typesafe.scalalogging.LazyLogging
 import io.netty.bootstrap.Bootstrap
 import io.netty.channel._
-import io.netty.channel.socket.SocketChannel
-import io.netty.channel.socket.nio.NioSocketChannel
 import io.netty.handler.codec.socksx.v5._
 import me.dijedodol.socks5.server.simple.config.Socks5Config
 import me.dijedodol.socks5.server.simple.handler.TunnelingChannelInboundHandler
 
 import scala.collection.JavaConverters
 
-class Socks5ClientInboundHandler(val acceptorEventLoopGroup: EventLoopGroup, val workerEventLoopGroup: EventLoopGroup, val socks5Config: Socks5Config) extends ChannelInboundHandlerAdapter with LazyLogging {
+class Socks5ClientInboundHandler(val clientBootstrap: Bootstrap, val socks5Config: Socks5Config) extends ChannelInboundHandlerAdapter with LazyLogging {
 
   var state: Int = 0
 
   def socks5HandleState0(ctx: ChannelHandlerContext, msg: Any) = {
     val socks5InitialRequest = msg.asInstanceOf[Socks5InitialRequest]
     val authMethods = JavaConverters.collectionAsScalaIterable(socks5InitialRequest.authMethods())
-
-    val tmp = socks5Config.authConfig.isAuthenticationRequired()
 
     val selectedAuthMethod = if (socks5Config.authConfig.isAuthenticationRequired()) authMethods.filter(f => Socks5AuthMethod.PASSWORD == f).headOption.getOrElse(Socks5AuthMethod.UNACCEPTED)
     else if (authMethods.isEmpty) Socks5AuthMethod.NO_AUTH
@@ -77,9 +72,7 @@ class Socks5ClientInboundHandler(val acceptorEventLoopGroup: EventLoopGroup, val
       case Socks5CommandType.CONNECT => {
         clientChannel.config().setAutoRead(false)
 
-        val bootstrap = createClientBootstrap()
-
-        bootstrap.connect(socks5CommandRequest.dstAddr(), socks5CommandRequest.dstPort()).addListener((f: ChannelFuture) => {
+        clientBootstrap.connect(socks5CommandRequest.dstAddr(), socks5CommandRequest.dstPort()).addListener((f: ChannelFuture) => {
           val peerChannel = f.channel();
 
           if (!peerChannel.isActive) {
@@ -89,7 +82,7 @@ class Socks5ClientInboundHandler(val acceptorEventLoopGroup: EventLoopGroup, val
             clientChannel.writeAndFlush(new DefaultSocks5CommandResponse(f.cause() match {
               case e: ConnectException => Socks5CommandStatus.CONNECTION_REFUSED
               case e: NoRouteToHostException => Socks5CommandStatus.HOST_UNREACHABLE
-              case _  => Socks5CommandStatus.FAILURE
+              case _ => Socks5CommandStatus.FAILURE
             }, Socks5AddressType.IPv4, "0.0.0.0", 0)).addListener((f: ChannelFuture) => f.channel().close())
           } else if (!peerChannel.localAddress().isInstanceOf[InetSocketAddress]) {
             logger.warn(s"unexpected localAddress: ${Option(peerChannel.localAddress())} className: ${Option(peerChannel.localAddress()).map(f => f.getClass.getName)} on peerChannel: ${peerChannel}")
@@ -126,20 +119,6 @@ class Socks5ClientInboundHandler(val acceptorEventLoopGroup: EventLoopGroup, val
       }
       case _ => clientChannel.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, Socks5AddressType.IPv4, "0.0.0.0", 0)).addListener((f: ChannelFuture) => f.channel().close())
     }
-  }
-
-  def createClientBootstrap(): Bootstrap = {
-    new Bootstrap()
-      .group(workerEventLoopGroup)
-      .channel(classOf[NioSocketChannel])
-      .option(ChannelOption.SO_KEEPALIVE, Boolean.TRUE)
-      .option(ChannelOption.TCP_NODELAY, Boolean.TRUE)
-      .option(ChannelOption.AUTO_READ, Boolean.FALSE)
-      .handler(new ChannelInitializer[SocketChannel] {
-        override def initChannel(ch: SocketChannel): Unit = {
-          ch.config.setPerformancePreferences(0, 2, 1)
-        }
-      })
   }
 
   override def channelRead(ctx: ChannelHandlerContext, msg: scala.Any): Unit = {
