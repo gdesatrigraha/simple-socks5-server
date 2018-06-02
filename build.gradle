@@ -3,7 +3,7 @@ plugins {
 }
 
 group 'me.dijedodol'
-version '1.0.2'
+version '1.0.3'
 
 task wrapper(type: Wrapper) {
   gradleVersion = '3.5'
